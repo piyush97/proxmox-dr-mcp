@@ -239,3 +239,24 @@ class ProxmoxClient:
             f"/nodes/{node}{endpoint}/{vmid}/snapshot/{snapname}"
         )
         return str(data) if data else ""
+
+    # ── Task polling ────────────────────────────────────────────────────
+
+    async def poll_task(self, node: str, upid: str) -> dict[str, Any]:
+        """Get current status of a Proxmox task."""
+        data = await self._get(f"/nodes/{node}/tasks/{upid}/status")
+        return data if isinstance(data, dict) else {}
+
+    async def wait_for_task(
+        self, node: str, upid: str, timeout: float = 30.0, poll_interval: float = 1.0
+    ) -> dict[str, Any]:
+        """Poll task until it completes or times out."""
+        import asyncio
+        deadline = asyncio.get_event_loop().time() + timeout
+        while True:
+            status = await self.poll_task(node, upid)
+            if status.get("status") == "stopped":
+                return status
+            if asyncio.get_event_loop().time() >= deadline:
+                raise TimeoutError(f"Task {upid[:40]}... did not complete within {timeout}s")
+            await asyncio.sleep(poll_interval)
