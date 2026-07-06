@@ -1,0 +1,14 @@
+.venv
+.git
+.gitignore
+__pycache__/
+*.pyc
+.env
+*.md
+mcpize.yaml
+Dockerfile
+.dockerignore
+README.md
+LICENSE
+tests/
+scripts/

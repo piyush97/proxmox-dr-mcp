@@ -74,7 +74,7 @@ async def main():
             print(f"    Snapshot gone: {not still}")
 
     # Tool registration smoke test
-    from mcp.server.fastmcp import FastMCP
+    from fastmcp import FastMCP
     from proxmox_dr_mcp.tools.preflight import register_preflight_tools
     from proxmox_dr_mcp.tools.snapshot import register_snapshot_tools
     from proxmox_dr_mcp.tools.health import register_health_tools

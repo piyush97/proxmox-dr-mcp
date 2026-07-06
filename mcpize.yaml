@@ -1,0 +1,61 @@
+version: 1
+name: proxmox-dr-mcp
+description: "Automated disaster recovery for Proxmox VE — pre-flight checks, smart snapshots, health verification, and rollback"
+runtime: python
+entry: src/proxmox_dr_mcp/server.py
+
+build:
+  install: uv sync --frozen --no-dev
+
+startCommand:
+  type: http
+  command: .venv/bin/python
+  args:
+    - "-m"
+    - proxmox_dr_mcp
+
+env:
+  PROXMOX_HOST:
+    description: "Proxmox VE hostname or IP"
+    required: true
+  PROXMOX_TOKEN_ID:
+    description: "Proxmox API token ID"
+    required: true
+  PROXMOX_TOKEN_VALUE:
+    description: "Proxmox API token secret"
+    required: true
+  PROXMOX_TOKEN_USER:
+    description: "Proxmox API token user"
+    required: false
+    default: "root@pam"
+  PROXMOX_VERIFY_SSL:
+    description: "Verify TLS certificates"
+    required: false
+    default: "false"
+  NODE:
+    description: "Default Proxmox node"
+    required: false
+    default: "pve"
+  PORT:
+    description: "HTTP server port"
+    required: false
+    default: "8080"
+
+pricing:
+  model: subscription
+  amount: 19
+  interval: month
+  free_tier: true
+
+categories:
+  - devops
+  - infrastructure
+  - virtualization
+
+tags:
+  - proxmox
+  - disaster-recovery
+  - snapshot
+  - homelab
+
+repository: "https://github.com/piyush97/proxmox-dr-mcp"

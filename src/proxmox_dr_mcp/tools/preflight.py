@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone, timedelta
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from proxmox_dr_mcp.proxmox.client import ProxmoxClient
 from proxmox_dr_mcp.utils.types import PreflightReport

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 
 from proxmox_dr_mcp.proxmox.client import ProxmoxClient
 
