@@ -159,7 +159,7 @@ class ProxmoxClient:
     async def get_vm_status(self, node: str, vmid: int) -> VMStatus:
         """Get detailed status of a single QEMU VM."""
         data = await self._get(f"/nodes/{node}/qemu/{vmid}/status/current")
-        return VMStatus(**data, node=node, vmid=vmid)
+        return VMStatus(**data, node=node)
 
     # ── Containers ───────────────────────────────────────────────────────
 
@@ -171,7 +171,7 @@ class ProxmoxClient:
     async def get_ct_status(self, node: str, vmid: int) -> ContainerStatus:
         """Get detailed status of a single LXC container."""
         data = await self._get(f"/nodes/{node}/lxc/{vmid}/status/current")
-        return ContainerStatus(**data, node=node, vmid=vmid)
+        return ContainerStatus(**data, node=node)
 
     # ── Snapshots ────────────────────────────────────────────────────────
 
@@ -182,22 +182,29 @@ class ProxmoxClient:
         snapname: str,
         description: str = "",
         vmstate: bool = False,
+        target_type: str = "vm",
     ) -> str:
-        """Create a VM snapshot.
+        """Create a VM/LXC snapshot.
 
+        *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
+        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
         body: dict[str, Any] = {"snapname": snapname}
         if description:
             body["description"] = description
         if vmstate:
             body["vmstate"] = 1
-        data = await self._post(f"/nodes/{node}/qemu/{vmid}/snapshot", data=body)
+        data = await self._post(f"/nodes/{node}{endpoint}/{vmid}/snapshot", data=body)
         return str(data) if data else ""
 
-    async def list_snapshots(self, node: str, vmid: int) -> list[Snapshot]:
-        """List all snapshots for a VM (excluding the ``current`` pseudo-entry)."""
-        data = await self._get(f"/nodes/{node}/qemu/{vmid}/snapshot")
+    async def list_snapshots(self, node: str, vmid: int, target_type: str = "vm") -> list[Snapshot]:
+        """List all snapshots for a VM or LXC.
+
+        *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
+        """
+        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
+        data = await self._get(f"/nodes/{node}{endpoint}/{vmid}/snapshot")
         return [
             Snapshot(**s, vmid=vmid, node=node)
             for s in data
@@ -205,26 +212,30 @@ class ProxmoxClient:
         ]
 
     async def rollback_snapshot(
-        self, node: str, vmid: int, snapname: str
+        self, node: str, vmid: int, snapname: str, target_type: str = "vm"
     ) -> str:
-        """Roll back a VM to *snapname*.
+        """Roll back a VM/LXC to *snapname*.
 
+        *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
+        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
         data = await self._post(
-            f"/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback",
+            f"/nodes/{node}{endpoint}/{vmid}/snapshot/{snapname}/rollback",
             data={"snapname": snapname},
         )
         return str(data) if data else ""
 
     async def delete_snapshot(
-        self, node: str, vmid: int, snapname: str
+        self, node: str, vmid: int, snapname: str, target_type: str = "vm"
     ) -> str:
-        """Delete a VM snapshot.
+        """Delete a VM/LXC snapshot.
 
+        *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
+        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
         data = await self._delete(
-            f"/nodes/{node}/qemu/{vmid}/snapshot/{snapname}"
+            f"/nodes/{node}{endpoint}/{vmid}/snapshot/{snapname}"
         )
         return str(data) if data else ""
