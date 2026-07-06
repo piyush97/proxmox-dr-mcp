@@ -74,6 +74,7 @@ def register_snapshot_tools(server: FastMCP, client: ProxmoxClient) -> None:
                             snapname=name,
                             description=description,
                             vmstate=include_ram and actual_type == "vm",
+                            target_type=actual_type,
                         )
                         results.append({
                             "node": node,
@@ -128,7 +129,7 @@ def register_snapshot_tools(server: FastMCP, client: ProxmoxClient) -> None:
 
                 for n, vmid, atype in items:
                     try:
-                        snaps = await client.list_snapshots(n, vmid)
+                        snaps = await client.list_snapshots(n, vmid, target_type=atype)
                         for s in snaps:
                             if s.name == "current":
                                 continue
@@ -172,6 +173,7 @@ def register_snapshot_tools(server: FastMCP, client: ProxmoxClient) -> None:
                 node=node,
                 vmid=vmid,
                 snapname=snapname,
+                target_type=target_type,
             )
             return {
                 "success": True,

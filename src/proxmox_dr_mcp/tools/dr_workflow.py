@@ -103,6 +103,7 @@ def register_dr_workflow_tools(server: FastMCP, client: ProxmoxClient) -> None:
                             snapname=snap_name,
                             description=f"Pre-upgrade snapshot via DR workflow",
                             vmstate=False,
+                            target_type=actual_type,
                         )
                         snapshots_created.append({"node": node_name, "vmid": vmid, "type": actual_type, "snapname": snap_name, "upid": upid})
                     except Exception as e:
