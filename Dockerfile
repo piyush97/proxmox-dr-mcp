@@ -16,6 +16,9 @@ COPY src/ ./src/
 # Install the project itself
 RUN uv sync --frozen --no-dev
 
+# Fix permissions so nobody can read everything
+RUN chmod -R o+r /app /app/.venv
+
 # Run as non-root user
 USER nobody
 
