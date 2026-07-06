@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import signal
 import sys
 import os
 from os import getenv
@@ -21,21 +20,31 @@ logger = logging.getLogger(__name__)
 
 
 def create_server() -> FastMCP:
-    """Create and configure the FastMCP server with all tools."""
-    config = get_config()
+    """Create and configure the FastMCP server with all tools.
 
+    NOTE: Config validation is deferred to tool execution time.
+    The server starts even without PROXMOX_HOST/token set.
+    Tools will return meaningful errors if credentials are missing.
+    """
     logging.basicConfig(
-        level=getattr(logging, config.log_level.upper(), logging.INFO),
+        level=getattr(logging, getenv("LOG_LEVEL", "INFO"), logging.INFO),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stderr,
     )
 
     logger.info("Creating Proxmox DR MCP server...")
-    logger.info(f"Target node: {config.node}")
-    logger.info(f"Snapshot prefix: {config.default_snapshot_prefix}")
 
     server = FastMCP(name="proxmox-dr-mcp")
-    client = ProxmoxClient(config)
+
+    # Create client lazily — config will be validated at tool call time
+    try:
+        config = get_config()
+        client = ProxmoxClient(config)
+        logger.info(f"Proxmox config loaded: {config.proxmox_host}")
+    except Exception as e:
+        logger.warning(f"Proxmox config not available at startup: {e}")
+        logger.warning("Tools will return errors until PROXMOX_HOST/TOKEN vars are set.")
+        client = None
 
     register_preflight_tools(server, client)
     register_snapshot_tools(server, client)
@@ -50,21 +59,15 @@ def main() -> None:
     """Main entry point — runs the HTTP MCP server."""
     port = int(getenv("PORT", "8080"))
 
-    try:
-        config = get_config()
-        if not config.proxmox_host:
-            print("ERROR: PROXMOX_HOST is required.", file=sys.stderr)
-            sys.exit(1)
-        if not config.proxmox_token_id or not config.proxmox_token_value:
-            print("ERROR: PROXMOX_TOKEN_ID and PROXMOX_TOKEN_VALUE are required.", file=sys.stderr)
-            sys.exit(1)
+    logger.info(f"Proxmox DR MCP server starting on port {port}...")
+    server = create_server()
 
-        logger.info(f"Proxmox DR MCP server starting on port {port}...")
-        server = create_server()
-        server.run(transport="streamable-http", host="0.0.0.0", port=port)
-    except Exception as e:
-        print(f"FATAL: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Health check endpoint
+    @server.get("/health")
+    async def health():
+        return {"status": "healthy", "server": "proxmox-dr-mcp"}
+
+    server.run(transport="streamable-http", host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":
