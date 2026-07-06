@@ -23,18 +23,21 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # --- Proxmox connection ---
-    proxmox_host: str = Field(
+    # --- Proxmox connection (optional — validated at tool time) ---
+    proxmox_host: str | None = Field(
+        default=None,
         description="Proxmox VE hostname or IP address",
     )
     proxmox_token_user: str = Field(
         default="root@pam",
         description="Proxmox VE API token user (e.g. root@pam)",
     )
-    proxmox_token_id: str = Field(
+    proxmox_token_id: str | None = Field(
+        default=None,
         description="Proxmox VE API token ID",
     )
-    proxmox_token_value: str = Field(
+    proxmox_token_value: str | None = Field(
+        default=None,
         description="Proxmox VE API token secret value",
     )
     proxmox_verify_ssl: bool = Field(

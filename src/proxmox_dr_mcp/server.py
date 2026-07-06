@@ -38,14 +38,17 @@ def create_server() -> FastMCP:
 
     server = FastMCP(name="proxmox-dr-mcp")
 
-    # Create client lazily — config will be validated at tool call time
-    try:
-        config = get_config()
-        client = ProxmoxClient(config)
-        logger.info(f"Proxmox config loaded: {config.proxmox_host}")
-    except Exception as e:
-        logger.warning(f"Proxmox config not available at startup: {e}")
-        logger.warning("Tools will return errors until PROXMOX_HOST/TOKEN vars are set.")
+    # Create client lazily — silently skip if no credentials set
+    config = get_config()
+    if config.proxmox_host and config.proxmox_token_id and config.proxmox_token_value:
+        try:
+            client = ProxmoxClient(config)
+            logger.info(f"Proxmox config loaded: {config.proxmox_host}")
+        except Exception as e:
+            logger.warning(f"Failed to create Proxmox client: {e}")
+            client = None
+    else:
+        logger.info("Proxmox credentials not set — tools will return errors until PROXMOX_HOST/TOKEN vars are configured.")
         client = None
 
     register_preflight_tools(server, client)
