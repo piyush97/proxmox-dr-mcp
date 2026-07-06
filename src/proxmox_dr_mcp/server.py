@@ -8,6 +8,8 @@ import os
 from os import getenv
 
 from fastmcp import FastMCP
+from starlette.responses import JSONResponse
+from starlette.requests import Request
 
 from proxmox_dr_mcp.config import get_config
 from proxmox_dr_mcp.proxmox.client import ProxmoxClient
@@ -62,10 +64,10 @@ def main() -> None:
     logger.info(f"Proxmox DR MCP server starting on port {port}...")
     server = create_server()
 
-    # Health check endpoint
-    @server.get("/health")
-    async def health():
-        return {"status": "healthy", "server": "proxmox-dr-mcp"}
+    # Health check for MCPize platform
+    @server.custom_route("/health", methods=["GET"])
+    async def health_check(request: Request) -> JSONResponse:
+        return JSONResponse({"status": "healthy", "server": "proxmox-dr-mcp"})
 
     server.run(transport="streamable-http", host="0.0.0.0", port=port)
 
