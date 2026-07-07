@@ -1,4 +1,4 @@
-# Proxmox DR Mnt": "# Proxmox DR MCP
+# Proxmox DR MCP
 
 **Automated disaster recovery for Proxmox VE** — pre-flight checks, smart snapshots, health verification, and rollback, all through natural language.
 
