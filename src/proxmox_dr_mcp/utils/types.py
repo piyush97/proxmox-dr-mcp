@@ -40,7 +40,6 @@ class SafeUpgradeParams(BaseModel):
     target_type: TargetType
     target_ids: list[int] | Literal["all"] = Field(default="all")
     preflight_only: bool = Field(default=False, description="Only run preflight, don't take action")
-    skip_health_check: bool = Field(default=False)
 
 
 class PreflightReport(BaseModel):

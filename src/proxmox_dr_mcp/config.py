@@ -41,7 +41,7 @@ class Settings(BaseSettings):
         description="Proxmox VE API token secret value",
     )
     proxmox_verify_ssl: bool = Field(
-        default=False,
+        default=True,
         description="Verify TLS certificates for Proxmox API",
     )
 

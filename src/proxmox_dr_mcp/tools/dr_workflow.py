@@ -3,35 +3,37 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+from typing import Literal
 
 from fastmcp import FastMCP
 
+from proxmox_dr_mcp.config import get_config
 from proxmox_dr_mcp.proxmox.client import ProxmoxClient
+from proxmox_dr_mcp.tools.preflight import run_preflight
+from proxmox_dr_mcp.utils.helpers import parse_vmid_list
 
 logger = logging.getLogger(__name__)
 
 
-def register_dr_workflow_tools(server: FastMCP, client: ProxmoxClient) -> None:
+def register_dr_workflow_tools(server: FastMCP, client: ProxmoxClient | None) -> None:
     """Register DR workflow MCP tools."""
 
     @server.tool(
         name="proxmox_dr_safe_upgrade",
-        description="""Orchestrated safe upgrade workflow.
-        Step 1: Pre-flight check (storage, backups, running services)
-        Step 2: Create snapshots of all targets
-        Step 3: Return upgrade instructions (user runs the upgrade)
-        Step 4: Health check to verify everything is healthy
+        description="""Create verified pre-upgrade snapshots after a passing pre-flight check.
+        Run proxmox_dr_health_check yourself after maintenance; this tool never claims
+        post-upgrade health before the upgrade has happened.
 
-        Pass preflight_only=True to only run step 1 without any action.""",
+        Pass preflight_only=True to only run the read-only safety check.""",
     )
     async def proxmox_dr_safe_upgrade(
-        target_type: str = "all",
+        target_type: Literal["vm", "lxc", "all"] = "all",
         target_ids: str = "all",
         preflight_only: bool = False,
-        skip_health_check: bool = False,
         snapshot_name: str | None = None,
     ) -> dict:
-        """Run safe upgrade workflow."""
+        """Run the preflight and snapshot phase of a safe upgrade."""
         workflow = {
             "workflow": "safe_upgrade",
             "target_type": target_type,
@@ -40,128 +42,82 @@ def register_dr_workflow_tools(server: FastMCP, client: ProxmoxClient) -> None:
             "success": False,
         }
 
-        # Step 1: Pre-flight
-        logger.info("Running pre-flight check...")
-        preflight_result = None
-        try:
-            nodes = await client.get_nodes()
-            storage_free = {}
-            warnings = []
-            for node_info in nodes:
-                storages = await client.get_storage(node_info.node)
-                for s in storages:
-                    free_gb = round((s.avail or 0) / (1024**3), 2)
-                    storage_free[s.storage] = free_gb
-                    if free_gb < 5:
-                        warnings.append(f"Low disk: {s.storage} has {free_gb}GB free")
-
-            preflight_result = {
-                "storage_free_gb": storage_free,
-                "warnings": warnings,
-                "passed": len(warnings) == 0,
-            }
-            workflow["steps"].append({"step": 1, "name": "preflight", "status": "complete", "result": preflight_result})
-        except Exception as e:
-            workflow["steps"].append({"step": 1, "name": "preflight", "status": "failed", "error": str(e)})
-            workflow["summary"] = f"Pre-flight check failed: {e}"
+        preflight = await run_preflight(client, target_type, target_ids)
+        workflow["steps"].append(
+            {"step": 1, "name": "preflight", "status": "complete", "result": preflight.model_dump()}
+        )
+        if not preflight.passed:
+            workflow["summary"] = "Pre-flight did not pass; no snapshots were created."
             return workflow
-
         if preflight_only:
             workflow["success"] = True
-            workflow["summary"] = "Pre-flight only mode — review the report above before proceeding."
+            workflow["summary"] = "Pre-flight passed; no snapshots were created."
+            return workflow
+        if client is None:  # run_preflight already reports this; keeps the type boundary explicit.
+            workflow["summary"] = "Proxmox credentials are not configured."
             return workflow
 
-        # Step 2: Create snapshots
-        logger.info("Creating pre-upgrade snapshots...")
+        ids_filter = set(parse_vmid_list(target_ids)) if target_ids != "all" else None
+        targets: list[tuple[str, int, Literal["vm", "lxc"]]] = []
         try:
-            from proxmox_dr_mcp.config import get_config
-            config = get_config()
-            import datetime
-            snap_name = snapshot_name or f"{config.default_snapshot_prefix}{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}"
-
-            snapshots_created = []
-            for node_info in nodes:
-                items = []
+            for node_info in await client.get_nodes():
                 if target_type in ("vm", "all"):
-                    vms = await client.get_vms(node_info.node)
-                    for vm in vms:
-                        if target_ids != "all" and str(vm.vmid) not in target_ids.split(","):
-                            continue
-                        items.append((node_info.node, vm.vmid, "vm"))
+                    for vm in await client.get_vms(node_info.node):
+                        if not vm.is_template and (ids_filter is None or vm.vmid in ids_filter):
+                            targets.append((node_info.node, vm.vmid, "vm"))
                 if target_type in ("lxc", "all"):
-                    cts = await client.get_containers(node_info.node)
-                    for ct in cts:
-                        if target_ids != "all" and str(ct.vmid) not in target_ids.split(","):
-                            continue
-                        items.append((node_info.node, ct.vmid, "lxc"))
-
-                for node_name, vmid, actual_type in items:
-                    try:
-                        upid = await client.create_snapshot(
-                            node=node_name,
-                            vmid=vmid,
-                            snapname=snap_name,
-                            description=f"Pre-upgrade snapshot via DR workflow",
-                            vmstate=False,
-                            target_type=actual_type,
-                        )
-                        snapshots_created.append({"node": node_name, "vmid": vmid, "type": actual_type, "snapname": snap_name, "upid": upid})
-                    except Exception as e:
-                        logger.warning(f"Failed to snapshot {node_name}/{vmid}: {e}")
-
-            workflow["steps"].append({
-                "step": 2,
-                "name": "snapshots",
-                "status": "complete",
-                "snapshot_name": snap_name,
-                "created": len(snapshots_created),
-                "snapshots": snapshots_created,
-            })
-        except Exception as e:
-            workflow["steps"].append({"step": 2, "name": "snapshots", "status": "failed", "error": str(e)})
-            workflow["summary"] = f"Snapshot creation failed: {e}"
+                    for ct in await client.get_containers(node_info.node):
+                        if not ct.is_template and (ids_filter is None or ct.vmid in ids_filter):
+                            targets.append((node_info.node, ct.vmid, "lxc"))
+        except Exception as exc:
+            workflow["steps"].append({"step": 2, "name": "snapshots", "status": "failed", "error": str(exc)})
+            workflow["summary"] = f"Could not select snapshot targets: {exc}"
             return workflow
 
-        # Step 3: Instructions
-        workflow["steps"].append({
-            "step": 3,
-            "name": "instructions",
-            "status": "ready",
-            "message": "Snapshots created. You can now safely perform your upgrade/maintenance. After completion, run proxmox_dr_health_check to verify everything is healthy.",
-            "rollback_command": f"To rollback: proxmox_dr_snapshot_restore with snapname={snap_name}",
-        })
+        if not targets:
+            workflow["steps"].append({"step": 2, "name": "snapshots", "status": "failed", "error": "No targets matched"})
+            workflow["summary"] = "No matching non-template targets; no snapshots were created."
+            return workflow
 
-        # Step 4: Health check (optional, runs automatically unless skipped)
-        if not skip_health_check:
-            logger.info("Running post-upgrade health check...")
+        snapshot_name = snapshot_name or f"{get_config().default_snapshot_prefix}{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+        snapshots: list[dict] = []
+        errors: list[str] = []
+        for node, vmid, actual_type in targets:
             try:
-                health_results = []
-                for node_info in nodes:
-                    vms = await client.get_vms(node_info.node)
-                    for vm in vms:
-                        if vm.status == "running":
-                            health_results.append({"node": node_info.node, "vmid": vm.vmid, "type": "vm", "status": vm.status, "healthy": True})
-                    cts = await client.get_containers(node_info.node)
-                    for ct in cts:
-                        if ct.status == "running":
-                            health_results.append({"node": node_info.node, "vmid": ct.vmid, "type": "lxc", "status": ct.status, "healthy": True})
+                upid = await client.create_snapshot(
+                    node=node,
+                    vmid=vmid,
+                    snapname=snapshot_name,
+                    description="Pre-upgrade snapshot via DR workflow",
+                    target_type=actual_type,
+                )
+                await client.wait_for_task(node, upid, timeout=300)
+                snapshots.append(
+                    {"node": node, "vmid": vmid, "type": actual_type, "snapname": snapshot_name, "upid": upid}
+                )
+            except Exception as exc:
+                logger.warning("Failed to snapshot %s/%s: %s", node, vmid, exc)
+                errors.append(f"{node}/{vmid}: {exc}")
 
-                all_healthy = all(r["healthy"] for r in health_results)
-                workflow["steps"].append({
-                    "step": 4,
-                    "name": "health_check",
-                    "status": "complete",
-                    "all_healthy": all_healthy,
-                    "services": health_results,
-                })
-                workflow["success"] = all_healthy
-                workflow["summary"] = f"{'✅ All services healthy' if all_healthy else '⚠️ Some services may need attention'} — {len(health_results)} services checked." if all_healthy else f"⚠️ {sum(1 for r in health_results if not r['healthy'])} services unhealthy — {len(health_results)} checked."
-            except Exception as e:
-                workflow["steps"].append({"step": 4, "name": "health_check", "status": "failed", "error": str(e)})
-                workflow["success"] = False
-                workflow["summary"] = f"Health check failed: {e}"
-        else:
-            workflow["success"] = True
-            workflow["summary"] = f"Workflow complete — {len(snapshots_created)} snapshots created. Health check skipped per request."
+        if errors:
+            workflow["steps"].append(
+                {"step": 2, "name": "snapshots", "status": "failed", "snapshots": snapshots, "errors": errors}
+            )
+            workflow["summary"] = "Not every snapshot completed; do not proceed with maintenance."
+            return workflow
 
+        workflow["steps"].append(
+            {"step": 2, "name": "snapshots", "status": "complete", "snapshot_name": snapshot_name, "snapshots": snapshots}
+        )
+        workflow["steps"].append(
+            {
+                "step": 3,
+                "name": "instructions",
+                "status": "ready",
+                "message": "Snapshots completed. Perform maintenance, then run proxmox_dr_health_check.",
+                "rollback_command": f"To rollback: proxmox_dr_snapshot_restore with snapname={snapshot_name}",
+            }
+        )
+        workflow["success"] = True
+        workflow["summary"] = f"{len(snapshots)} snapshots completed. Post-upgrade health has not been checked yet."
         return workflow

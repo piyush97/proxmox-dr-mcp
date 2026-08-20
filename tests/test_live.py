@@ -1,5 +1,7 @@
 """Live integration test — creates/deletes a test snapshot and waits for task completion."""
 
+__test__ = False  # This script mutates a real Proxmox host; run it manually.
+
 import asyncio, sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 os.chdir(os.path.dirname(__file__))
@@ -9,7 +11,7 @@ from proxmox_dr_mcp.proxmox.client import ProxmoxClient
 
 passed = failed = 0
 
-async def test(name, fn):
+async def _run(name, fn):
     global passed, failed
     try:
         r = await fn()
@@ -26,11 +28,11 @@ async def main():
     config = get_config()
     client = ProxmoxClient(config)
 
-    nodes = await test("Connect to Proxmox", lambda: client.get_nodes())
+    nodes = await _run("Connect to Proxmox", lambda: client.get_nodes())
     if not nodes: return
     node = nodes[0].node
 
-    cts = await test("List containers", lambda: client.get_containers(node))
+    cts = await _run("List containers", lambda: client.get_containers(node))
     running = [c for c in (cts or []) if c.status == "running"]
     target = next((c for c in running if c.vmid in (105, 108, 110)), running[0] if running else None)
     if not target:
@@ -39,35 +41,35 @@ async def main():
 
     # Create snapshot
     snap_name = f"test-{__import__('datetime').datetime.now().strftime('%Y%m%d-%H%M%S')}"
-    upid = await test(f"Create snapshot {snap_name} on CT {target.vmid}",
+    upid = await _run(f"Create snapshot {snap_name} on CT {target.vmid}",
                       lambda: client.create_snapshot(node, target.vmid, snap_name,
                                                      description="DR MCP test", target_type="lxc"))
     if upid:
         # Wait for task
-        status = await test(f"Wait for snapshot task",
+        status = await _run(f"Wait for snapshot task",
                            lambda: client.wait_for_task(node, upid))
         if status:
             print(f"    exitstatus: {status.get('exitstatus')}")
 
         # Verify
-        snaps = await test(f"Verify snapshot exists",
+        snaps = await _run(f"Verify snapshot exists",
                           lambda: client.list_snapshots(node, target.vmid, target_type="lxc"))
         if snaps:
             found = any(s.name == snap_name for s in snaps)
             print(f"    Snapshot present: {found}")
 
         # Delete
-        del_upid = await test(f"Delete snapshot {snap_name}",
+        del_upid = await _run(f"Delete snapshot {snap_name}",
                              lambda: client.delete_snapshot(node, target.vmid, snap_name, target_type="lxc"))
         if del_upid:
             # Wait for delete task
-            status2 = await test(f"Wait for delete task",
+            status2 = await _run(f"Wait for delete task",
                                 lambda: client.wait_for_task(node, del_upid))
             if status2:
                 print(f"    exitstatus: {status2.get('exitstatus')}")
 
         # Verify gone
-        snaps2 = await test(f"Verify snapshot deleted",
+        snaps2 = await _run(f"Verify snapshot deleted",
                            lambda: client.list_snapshots(node, target.vmid, target_type="lxc"))
         if snaps2:
             still = any(s.name == snap_name for s in snaps2)
@@ -85,7 +87,7 @@ async def main():
                 register_health_tools, register_dr_workflow_tools]:
         reg(server, client)
     tools = server._tool_manager.list_tools()
-    await test(f"Register all {len(tools)} tools", lambda: asyncio.sleep(0))
+    await _run(f"Register all {len(tools)} tools", lambda: asyncio.sleep(0))
     for t in tools:
         print(f"      {t.name}")
 

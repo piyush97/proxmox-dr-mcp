@@ -21,16 +21,18 @@ Give your AI assistant (Claude, Cursor, Codex, Windsurf) the ability to safely m
 | `proxmox_dr_snapshot_list` | List all snapshots across the cluster with metadata |
 | `proxmox_dr_snapshot_restore` | Rollback to a previous snapshot safely |
 | `proxmox_dr_health_check` | Verify VMs/containers are running and healthy post-operation |
-| `proxmox_dr_safe_upgrade` | **Orchestrated workflow**: preflight → snapshots → upgrade instructions → health check |
+| `proxmox_dr_safe_upgrade` | **Safe preparation**: preflight → verified snapshots → upgrade instructions |
 
 ### Workflow: Safe Upgrade
 
-The `proxmox_dr_safe_upgrade` tool runs a 4-step orchestrated workflow:
+The `proxmox_dr_safe_upgrade` tool prepares an upgrade in three safety-gated steps:
 
 1. **Pre-flight** — checks storage space, backup freshness, running services
-2. **Snapshot** — creates pre-upgrade snapshots of all targets
+2. **Snapshot** — creates and waits for every pre-upgrade snapshot to complete
 3. **Instructions** — tells you the upgrade is safe to proceed
-4. **Health Check** — verifies everything is healthy after your maintenance
+
+After maintenance, run `proxmox_dr_health_check` separately. A one-shot tool cannot
+verify a future upgrade, so it deliberately never reports post-upgrade health early.
 
 ---
 
@@ -63,7 +65,8 @@ PROXMOX_HOST=192.168.1.100
 PROXMOX_TOKEN_ID=my-token-id
 PROXMOX_TOKEN_VALUE=my-token-secret
 PROXMOX_TOKEN_USER=root@pam
-PROXMOX_VERIFY_SSL=false
+# Keep true in production. Set false only for a self-signed lab certificate.
+PROXMOX_VERIFY_SSL=true
 NODE=pve
 ```
 
@@ -138,7 +141,7 @@ Once connected, try these:
 |--------|-------------|
 | *"Run a pre-flight check before I upgrade my Proxmox host"* | Checks disk space, backups, running services |
 | *"Create snapshots of all my VMs before the kernel update"* | Snapshots every VM with auto-naming |
-| *"Run a safe upgrade workflow on VM 101"* | Full 4-step orchestrated workflow |
+| *"Run a safe upgrade workflow on VM 101"* | Pre-flight and verified snapshots before maintenance |
 | *"List all recent snapshots"* | Shows snapshot inventory across the cluster |
 | *"Check if all my containers are healthy"* | Health check on every LXC |
 | *"Rollback VM 102 to the snapshot from yesterday"* | One-command rollback |
@@ -180,6 +183,7 @@ uv sync
 
 # Run smoke tests
 uv run python tests/test_smoke.py
+uv run python tests/test_safety.py
 
 # Run live integration test (requires Proxmox env vars)
 uv run python tests/test_live.py
@@ -209,4 +213,3 @@ MIT — see [LICENSE](LICENSE)
 ## 👤 Author
 
 [Piyush Mehta](https://github.com/piyush97) — Senior Software Engineer, AI/LLM/Agentic systems.
-"}

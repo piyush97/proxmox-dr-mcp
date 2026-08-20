@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastmcp import FastMCP
 
 from proxmox_dr_mcp.proxmox.client import ProxmoxClient
+from proxmox_dr_mcp.utils.helpers import parse_vmid_list
 from proxmox_dr_mcp.utils.types import HealthCheckResult
 
 logger = logging.getLogger(__name__)
 
 
-def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
+def register_health_tools(server: FastMCP, client: ProxmoxClient | None) -> None:
     """Register health check MCP tools."""
 
     @server.tool(
@@ -22,7 +24,7 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
     )
     async def proxmox_dr_health_check(
         targets: list[dict] | None = None,
-        target_type: str = "all",
+        target_type: Literal["vm", "lxc", "all"] = "all",
         target_ids: str = "all",
     ) -> dict:
         """Run health checks.
@@ -36,9 +38,10 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
         """
         results: list[HealthCheckResult] = []
 
-        try:
-            nodes = await client.get_nodes()
+        if client is None:
+            return {"error": "Proxmox credentials are not configured", "results": [], "all_passed": False}
 
+        try:
             if targets:
                 # Check specific targets
                 for t in targets:
@@ -46,6 +49,8 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
                     vmid = t.get("vmid", 0)
                     ttype = t.get("target_type", "vm")
                     try:
+                        if ttype not in ("vm", "lxc"):
+                            raise ValueError("target_type must be 'vm' or 'lxc'")
                         if ttype == "vm":
                             status = await client.get_vm_status(node_name, vmid)
                             passed = status.status == "running"
@@ -79,12 +84,12 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
                         ))
             else:
                 # Check all matching
-                ids_filter = target_ids.split(",") if target_ids != "all" else None
-                for node_info in nodes[:1]:
+                ids_filter = set(parse_vmid_list(target_ids)) if target_ids != "all" else None
+                for node_info in await client.get_nodes():
                     if target_type in ("vm", "all"):
                         vms = await client.get_vms(node_info.node)
                         for vm in vms:
-                            if ids_filter and str(vm.vmid) not in ids_filter:
+                            if ids_filter is not None and vm.vmid not in ids_filter:
                                 continue
                             passed = vm.status == "running"
                             results.append(HealthCheckResult(
@@ -98,7 +103,7 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
                     if target_type in ("lxc", "all"):
                         cts = await client.get_containers(node_info.node)
                         for ct in cts:
-                            if ids_filter and str(ct.vmid) not in ids_filter:
+                            if ids_filter is not None and ct.vmid not in ids_filter:
                                 continue
                             passed = ct.status == "running"
                             results.append(HealthCheckResult(
@@ -113,7 +118,7 @@ def register_health_tools(server: FastMCP, client: ProxmoxClient) -> None:
             logger.error(f"Health check error: {e}")
             return {"error": str(e), "results": [], "all_passed": False}
 
-        all_passed = all(r.passed for r in results)
+        all_passed = bool(results) and all(r.passed for r in results)
         return {
             "results": [r.model_dump() for r in results],
             "total": len(results),

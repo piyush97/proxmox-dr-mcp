@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -13,6 +14,7 @@ from proxmox_dr_mcp.proxmox.exceptions import (
     ConnectionError,
     NotFoundError,
     ProxmoxError,
+    TaskError,
 )
 from proxmox_dr_mcp.proxmox.models import (
     ContainerStatus,
@@ -23,6 +25,19 @@ from proxmox_dr_mcp.proxmox.models import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _segment(value: str) -> str:
+    """Encode one untrusted Proxmox API path segment."""
+    return quote(value, safe="")
+
+
+def _target_endpoint(target_type: str) -> str:
+    if target_type == "vm":
+        return "/qemu"
+    if target_type == "lxc":
+        return "/lxc"
+    raise ValueError("target_type must be 'vm' or 'lxc'")
 
 
 class ProxmoxClient:
@@ -139,38 +154,44 @@ class ProxmoxClient:
 
     async def get_storage(self, node: str) -> list[Storage]:
         """List storage devices available on *node*."""
-        data = await self._get(f"/nodes/{node}/storage")
+        data = await self._get(f"/nodes/{_segment(node)}/storage")
         return [Storage(**s, node=node) for s in data]
 
     async def get_storage_content(
         self, node: str, storage: str
     ) -> list[dict[str, Any]]:
         """List content (backups, ISO, templates) on a *storage* of *node*."""
-        data = await self._get(f"/nodes/{node}/storage/{storage}/content")
+        data = await self._get(
+            f"/nodes/{_segment(node)}/storage/{_segment(storage)}/content"
+        )
         return data  # list of raw dicts - shape varies by content type
 
     # ── VMs ──────────────────────────────────────────────────────────────
 
     async def get_vms(self, node: str) -> list[VMStatus]:
         """List QEMU virtual machines on *node*."""
-        data = await self._get(f"/nodes/{node}/qemu")
+        data = await self._get(f"/nodes/{_segment(node)}/qemu")
         return [VMStatus(**vm, node=node) for vm in data]
 
     async def get_vm_status(self, node: str, vmid: int) -> VMStatus:
         """Get detailed status of a single QEMU VM."""
-        data = await self._get(f"/nodes/{node}/qemu/{vmid}/status/current")
+        data = await self._get(
+            f"/nodes/{_segment(node)}/qemu/{vmid}/status/current"
+        )
         return VMStatus(**data, node=node)
 
     # ── Containers ───────────────────────────────────────────────────────
 
     async def get_containers(self, node: str) -> list[ContainerStatus]:
         """List LXC containers on *node*."""
-        data = await self._get(f"/nodes/{node}/lxc")
+        data = await self._get(f"/nodes/{_segment(node)}/lxc")
         return [ContainerStatus(**ct, node=node) for ct in data]
 
     async def get_ct_status(self, node: str, vmid: int) -> ContainerStatus:
         """Get detailed status of a single LXC container."""
-        data = await self._get(f"/nodes/{node}/lxc/{vmid}/status/current")
+        data = await self._get(
+            f"/nodes/{_segment(node)}/lxc/{vmid}/status/current"
+        )
         return ContainerStatus(**data, node=node)
 
     # ── Snapshots ────────────────────────────────────────────────────────
@@ -189,13 +210,15 @@ class ProxmoxClient:
         *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
-        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
+        endpoint = _target_endpoint(target_type)
         body: dict[str, Any] = {"snapname": snapname}
         if description:
             body["description"] = description
         if vmstate:
             body["vmstate"] = 1
-        data = await self._post(f"/nodes/{node}{endpoint}/{vmid}/snapshot", data=body)
+        data = await self._post(
+            f"/nodes/{_segment(node)}{endpoint}/{vmid}/snapshot", data=body
+        )
         return str(data) if data else ""
 
     async def list_snapshots(self, node: str, vmid: int, target_type: str = "vm") -> list[Snapshot]:
@@ -203,8 +226,8 @@ class ProxmoxClient:
 
         *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         """
-        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
-        data = await self._get(f"/nodes/{node}{endpoint}/{vmid}/snapshot")
+        endpoint = _target_endpoint(target_type)
+        data = await self._get(f"/nodes/{_segment(node)}{endpoint}/{vmid}/snapshot")
         return [
             Snapshot(**s, vmid=vmid, node=node)
             for s in data
@@ -219,9 +242,9 @@ class ProxmoxClient:
         *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
-        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
+        endpoint = _target_endpoint(target_type)
         data = await self._post(
-            f"/nodes/{node}{endpoint}/{vmid}/snapshot/{snapname}/rollback",
+            f"/nodes/{_segment(node)}{endpoint}/{vmid}/snapshot/{_segment(snapname)}/rollback",
             data={"snapname": snapname},
         )
         return str(data) if data else ""
@@ -234,9 +257,9 @@ class ProxmoxClient:
         *target_type* — ``"vm"`` (QEMU, default) or ``"lxc"``.
         Returns the task UPID string.
         """
-        endpoint = "/lxc" if target_type == "lxc" else "/qemu"
+        endpoint = _target_endpoint(target_type)
         data = await self._delete(
-            f"/nodes/{node}{endpoint}/{vmid}/snapshot/{snapname}"
+            f"/nodes/{_segment(node)}{endpoint}/{vmid}/snapshot/{_segment(snapname)}"
         )
         return str(data) if data else ""
 
@@ -244,7 +267,7 @@ class ProxmoxClient:
 
     async def poll_task(self, node: str, upid: str) -> dict[str, Any]:
         """Get current status of a Proxmox task."""
-        data = await self._get(f"/nodes/{node}/tasks/{upid}/status")
+        data = await self._get(f"/nodes/{_segment(node)}/tasks/{_segment(upid)}/status")
         return data if isinstance(data, dict) else {}
 
     async def wait_for_task(
@@ -256,6 +279,11 @@ class ProxmoxClient:
         while True:
             status = await self.poll_task(node, upid)
             if status.get("status") == "stopped":
+                if status.get("exitstatus") != "OK":
+                    raise TaskError(
+                        f"Task {upid[:40]}... failed: {status.get('exitstatus', 'unknown')}",
+                        task_upid=upid,
+                    )
                 return status
             if asyncio.get_event_loop().time() >= deadline:
                 raise TimeoutError(f"Task {upid[:40]}... did not complete within {timeout}s")

@@ -31,7 +31,7 @@ env:
   PROXMOX_VERIFY_SSL:
     description: "Verify TLS certificates"
     required: false
-    default: "false"
+    default: "true"
   NODE:
     description: "Default Proxmox node"
     required: false
