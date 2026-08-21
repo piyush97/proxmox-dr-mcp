@@ -15,7 +15,7 @@ async def _test_tool_registration():
     register_health_tools(server, None)
     register_dr_workflow_tools(server, None)
 
-    tools = await server._tool_manager.get_tools()
+    tools = await server.list_tools()
     print(f"✅ {len(tools)} tools registered")
     for t in tools:
         print(f"   - {t}")
