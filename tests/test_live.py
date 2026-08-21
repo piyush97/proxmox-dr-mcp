@@ -86,7 +86,7 @@ async def main():
     for reg in [register_preflight_tools, register_snapshot_tools,
                 register_health_tools, register_dr_workflow_tools]:
         reg(server, client)
-    tools = server._tool_manager.list_tools()
+    tools = await server.list_tools()
     await _run(f"Register all {len(tools)} tools", lambda: asyncio.sleep(0))
     for t in tools:
         print(f"      {t.name}")

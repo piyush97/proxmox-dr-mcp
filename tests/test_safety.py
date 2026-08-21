@@ -75,7 +75,7 @@ async def main() -> None:
 async def _safe_upgrade(client: FakeClient) -> dict:
     server = FastMCP(name="safety-test")
     register_dr_workflow_tools(server, client)
-    tool = await server._tool_manager.get_tool("proxmox_dr_safe_upgrade")
+    tool = await server.get_tool("proxmox_dr_safe_upgrade")
     return await tool.fn(target_type="vm")
 
 
